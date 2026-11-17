@@ -1,4 +1,4 @@
-import whatportis
+from functools import lru_cache
 import socket
 import json
 import os
@@ -536,7 +536,7 @@ def get_cms_details(url):
 	"""
 	# this function will fetch cms details using cms_detector
 	response = {}
-	cms_detector_command = f'python3 /usr/src/github/CMSeeK/cmseek.py --random-agent --batch --follow-redirect -u {url}'
+	cms_detector_command = f'{tool_python("/usr/src/github/CMSeeK")} /usr/src/github/CMSeeK/cmseek.py --random-agent --batch --follow-redirect -u {url}'
 	os.system(cms_detector_command)
 
 	response['status'] = False
@@ -1035,6 +1035,11 @@ def get_open_ai_key():
 	return openai_key[0] if openai_key else None
 
 
+def get_anthropic_key():
+	anthropic_key = AnthropicAPIKey.objects.all()
+	return anthropic_key[0] if anthropic_key else None
+
+
 def get_netlas_key():
 	netlas_key = NetlasAPIKey.objects.all()
 	return netlas_key[0] if netlas_key else None
@@ -1054,29 +1059,47 @@ def get_hackerone_key_username():
 	return (hackerone_key[0].username, hackerone_key[0].key) if hackerone_key else None
 
 
+_LLM_SECTION_RE = re.compile(
+	# optional markdown heading / numbering / bold, then the section name,
+	# then EITHER a colon (content may follow inline) OR end of line.
+	r'^[ \t]*(?:#{1,6}[ \t]*)?(?:\d+[.)][ \t]*)?[*_]*[ \t]*'
+	r'(?:vulnerability[ \t]+)?(description|impact|remediation|references?)[ \t]*[*_]*'
+	r'(?:[ \t]*:[ \t]*[*_]*[ \t]*(.*)|[ \t]*)$',
+	re.IGNORECASE | re.MULTILINE,
+)
+_URL_RE = re.compile(r'https?://[^\s<>()\[\]"\']+')
+
+
 def parse_llm_vulnerability_report(report):
-	report = report.replace('**', '')
+	"""Split an LLM vulnerability write-up into its sections.
+
+	Accepts the requested plain-text format ("Description:\n...") as well as
+	the markdown variants models commonly produce instead
+	("### Description", "**Impact:** ...", "1. Remediation").
+	"""
+	if not report:
+		return {}
+	matches = list(_LLM_SECTION_RE.finditer(report))
 	data = {}
-	sections = re.split(r'\n(?=(?:Description|Impact|Remediation|References):)', report.strip())
-	
-	try:
-		for section in sections:
-			if not section.strip():
-				continue
-			
-			section_title, content = re.split(r':\n', section.strip(), maxsplit=1)
-			
-			if section_title == 'Description':
-				data['description'] = content.strip()
-			elif section_title == 'Impact':
-				data['impact'] = content.strip()
-			elif section_title == 'Remediation':
-				data['remediation'] = content.strip()
-			elif section_title == 'References':
-				data['references'] = [ref.strip() for ref in content.split('\n') if ref.strip()]
-	except Exception as e:
-		return data
-	
+	for i, m in enumerate(matches):
+		title = m.group(1).lower()
+		if title == 'reference':
+			title = 'references'
+		body_end = matches[i + 1].start() if i + 1 < len(matches) else len(report)
+		body = ((m.group(2) or '') + report[m.end():body_end]).strip()
+		if title in data:  # keep the first occurrence of each section
+			continue
+		if title == 'references':
+			urls = [u.rstrip('.,;:') for u in _URL_RE.findall(body)]
+			if urls:
+				data['references'] = list(dict.fromkeys(urls))
+			else:
+				data['references'] = [
+					line.strip().lstrip('-*0123456789.) ').strip()
+					for line in body.splitlines() if line.strip()
+				]
+		else:
+			data[title] = body.replace('**', '').strip()
 	return data
 
 
@@ -1109,47 +1132,67 @@ def create_scan_object(host_id, engine_id, initiated_by_id=None):
 	return scan.id
 
 
+NMAP_SERVICES_FILE = '/usr/share/nmap/nmap-services'
+
+
+@lru_cache(maxsize=1)
+def _load_nmap_services():
+	"""Parse nmap's service database into {port: (name, description)}.
+
+	Replaces the unmaintained `whatportis` package, which pinned
+	requests==2.25.1. nmap is already installed in the reNgine image.
+	For each TCP port the most frequently seen service wins.
+	"""
+	services = {}
+	try:
+		with open(NMAP_SERVICES_FILE, encoding='utf-8', errors='ignore') as f:
+			for line in f:
+				if not line.strip() or line.startswith('#'):
+					continue
+				parts = line.rstrip('\n').split('\t')
+				if len(parts) < 3 or '/' not in parts[1]:
+					continue
+				port_str, proto = parts[1].split('/', 1)
+				if proto != 'tcp' or parts[0] == 'unknown':
+					continue
+				try:
+					freq = float(parts[2])
+					port_num = int(port_str)
+				except ValueError:
+					continue
+				description = parts[3].lstrip('# ').strip() if len(parts) > 3 else ''
+				if port_num not in services or freq > services[port_num][2]:
+					services[port_num] = (parts[0], description, freq)
+	except OSError:
+		logger.warning(f'{NMAP_SERVICES_FILE} not found, falling back to socket lookup')
+	return {k: (v[0], v[1]) for k, v in services.items()}
+
+
 def get_port_service_description(port):
 	"""
-		Retrieves the standard service name and description for a given port 
-		number using whatportis and the builtin socket library as fallback.
+		Retrieves the standard service name and description for a given port
+		number using nmap's service database, with the builtin socket library
+		as fallback.
 
 		Args:
-			port (int or str): The port number to look up. 
-				Can be an integer or a string representation of an integer.
+			port (int or str): The port number to look up.
 
 		Returns:
 			dict: A dictionary containing the service name and description for the port number.
 	"""
-	logger.info('Fetching Port Service Name and Description')
+	empty = {"service_name": "", "description": ""}
 	try:
 		port = int(port)
-		whatportis_result = whatportis.get_ports(str(port))
-		
-		if whatportis_result and whatportis_result[0].name:
-			return {
-				"service_name": whatportis_result[0].name,
-				"description": whatportis_result[0].description
-			}
-		else:
-			try:
-				service = socket.getservbyport(port)
-				return {
-					"service_name": service,
-					"description": "" # Keep description blank when using socket
-				}
-			except OSError:
-				# If both whatportis and socket fail
-				return {
-					"service_name": "",
-					"description": ""
-				}
-	except:
-		# port is not a valid int or any other exception
-		return {
-			"service_name": "",
-			"description": ""
-		}
+	except (TypeError, ValueError):
+		return empty
+
+	match = _load_nmap_services().get(port)
+	if match:
+		return {"service_name": match[0], "description": match[1]}
+	try:
+		return {"service_name": socket.getservbyport(port), "description": ""}
+	except (OSError, OverflowError):
+		return empty
 
 
 def update_or_create_port(port_number, service_name=None, description=None):

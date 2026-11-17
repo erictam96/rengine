@@ -28,10 +28,31 @@ class OpenAiAPIKey(models.Model):
 		return self.key
 	
 
+class AnthropicAPIKey(models.Model):
+	id = models.AutoField(primary_key=True)
+	key = models.CharField(max_length=500)
+
+	def __str__(self):
+		return self.key
+
+
+LLM_PROVIDER_CHOICES = (
+	('openai', 'OpenAI / OpenAI-compatible'),
+	('anthropic', 'Anthropic Claude'),
+	('ollama', 'Ollama (local)'),
+)
+
+
 class OllamaSettings(models.Model):
+	"""Selected LLM model and provider.
+
+	The historical name is kept to avoid a table rename; it now stores the
+	selection for every provider, not only Ollama.
+	"""
 	id = models.AutoField(primary_key=True)
 	selected_model = models.CharField(max_length=500)
 	use_ollama = models.BooleanField(default=True)
+	provider = models.CharField(max_length=20, choices=LLM_PROVIDER_CHOICES, default='ollama')
 
 	def __str__(self):
 		return self.selected_model

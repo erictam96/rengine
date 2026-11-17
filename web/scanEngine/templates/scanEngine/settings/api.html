@@ -42,6 +42,21 @@ API Vault
                 <span class="text-muted float-end optional-text mt-2">This is optional but recommended. Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">https://platform.openai.com/api-keys</a></span>
               </div>
               <div class="mb-3">
+                <label for="key_anthropic" class="form-label">Anthropic (Claude)</label>
+                <p class="text-muted">Anthropic keys are used when a Claude model is selected in the LLM Toolkit for vulnerability descriptions, attack surface suggestions and report writing.</p>
+                <div class="flex-grow-1 position-relative">
+                {% if anthropic_key %}
+                  <input class="form-control" type="password" id="key_anthropic" name="key_anthropic" placeholder="Enter Anthropic API Key" value="{{anthropic_key}}">
+                {% else %}
+                  <input class="form-control" type="text" id="key_anthropic" name="key_anthropic" placeholder="Enter Anthropic API Key">
+                {% endif %}
+                  <div class="position-absolute top-50 end-0 translate-middle-y pe-2" style="cursor: pointer;" data-password="false">
+                    <span class="password-eye"></span>
+                  </div>
+                </div>
+                <span class="text-muted float-end optional-text mt-2">Optional. Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">https://console.anthropic.com/settings/keys</a></span>
+              </div>
+              <div class="mb-3">
                 <label for="key_netlas" class="form-label">Netlas</label>
                 <p class="text-muted">Netlas keys will be used to get whois information and other OSINT related data.</p>
                 <div class="flex-grow-1 position-relative">

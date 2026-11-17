@@ -1,6 +1,6 @@
 import re
 import os
-import validators
+from reNgine import validators_compat as validators
 
 from celery._state import get_current_task
 from celery.utils.log import ColorFormatter

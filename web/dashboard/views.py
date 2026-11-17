@@ -272,13 +272,14 @@ def on_user_logged_out(sender, request, **kwargs):
 
 
 @receiver(user_logged_in)
-def on_user_logged_in(sender, request, **kwargs):
-    messages.add_message(
-        request,
-        messages.INFO,
-        'Hi @' +
-        request.user.username +
-        ' welcome back!')
+def on_user_logged_in(sender, request, user=None, **kwargs):
+    if request is None or user is None:
+        return
+    try:
+        messages.add_message(request, messages.INFO, f'Hi @{user.username} welcome back!')
+    except messages.MessageFailure:
+        # no message middleware on this request (e.g. API / test client)
+        pass
 
 
 def search(request, slug):
@@ -334,6 +335,7 @@ def onboarding(request):
         create_password = request.POST.get('create_password')
         create_user_role = request.POST.get('create_user_role')
         key_openai = request.POST.get('key_openai')
+        key_anthropic = request.POST.get('key_anthropic')
         key_netlas = request.POST.get('key_netlas')
         key_chaos = request.POST.get('key_chaos')
         key_hackerone = request.POST.get('key_hackerone')
@@ -376,6 +378,9 @@ def onboarding(request):
         except Exception as e:
             error = ' Could not create User, Error: ' + str(e)
 
+        if key_anthropic:
+            AnthropicAPIKey.objects.update_or_create(id=1, defaults={'key': key_anthropic})
+
         if key_openai:
             openai_api_key = OpenAiAPIKey.objects.first()
             if openai_api_key:
@@ -416,6 +421,7 @@ def onboarding(request):
     
 
     context['openai_key'] = OpenAiAPIKey.objects.first()
+    context['anthropic_key'] = AnthropicAPIKey.objects.first()
     context['netlas_key'] = NetlasAPIKey.objects.first()
     context['chaos_key'] = ChaosAPIKey.objects.first()
     context['hackerone_key'] = HackerOneAPIKey.objects.first().key if HackerOneAPIKey.objects.first() else ''

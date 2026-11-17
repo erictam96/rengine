@@ -2,7 +2,7 @@ import re
 import socket
 import logging
 import requests
-import validators
+from reNgine import validators_compat as validators
 import requests
 
 from ipaddress import IPv4Network
@@ -276,6 +276,9 @@ class InAppNotificationManagerViewSet(viewsets.ModelViewSet):
 	pagination_class = None
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		# we will see later if user based notif is needed
 		# return InAppNotification.objects.filter(user=self.request.user)
 		project_slug = self.request.query_params.get('project_slug')
@@ -333,82 +336,69 @@ class InAppNotificationManagerViewSet(viewsets.ModelViewSet):
 
 
 class OllamaManager(APIView):
+	"""Manage LLM models.
+
+	POST   ?model=<name>                      pull an Ollama model
+	DELETE ?model=<name>                      delete an Ollama model
+	PUT    ?model=<name>&provider=<provider>  select model for LLM features
+	"""
 	permission_classes = [HasPermission]
 	permission_required = PERM_MODIFY_SYSTEM_CONFIGURATIONS
 
+	def post(self, request):
+		import ollama
+		model_name = request.query_params.get('model') or request.data.get('model')
+		if not model_name:
+			return Response({'status': False, 'error': 'Missing `model` parameter'}, status=HTTP_400_BAD_REQUEST)
+		try:
+			# Pulling can take many minutes for large models
+			ollama.Client(host=OLLAMA_INSTANCE, timeout=None).pull(model_name)
+			return Response({'status': True})
+		except Exception as e:
+			return Response({'status': False, 'error': str(e)})
+
 	def get(self, request):
-		"""
-		API to download Ollama Models
-		sends a POST request to download the model
-		"""
-		req = self.request
-		model_name = req.query_params.get('model')
-		response = {
-			'status': False
-		}
-		try:
-			pull_model_api = f'{OLLAMA_INSTANCE}/api/pull'
-			_response = requests.post(
-				pull_model_api, 
-				json={
-					'name': model_name,
-					'stream': False
-				}
-			).json()
-			if _response.get('error'):
-				response['status'] = False
-				response['error'] = _response.get('error')
-			else:
-				response['status'] = True
-		except Exception as e:
-			response['error'] = str(e)		
-		return Response(response)
-	
+		# Deprecated: model downloads were triggered via GET before 2.3.0.
+		# Kept so old frontends keep working; new UI uses POST.
+		return self.post(request)
+
 	def delete(self, request):
-		req = self.request
-		model_name = req.query_params.get('model')
-		delete_model_api = f'{OLLAMA_INSTANCE}/api/delete'
-		response = {
-			'status': False
-		}
+		import ollama
+		model_name = request.query_params.get('model')
+		if not model_name:
+			return Response({'status': False, 'error': 'Missing `model` parameter'}, status=HTTP_400_BAD_REQUEST)
 		try:
-			_response = requests.delete(
-				delete_model_api, 
-				json={
-					'name': model_name
-				}
-			).json()
-			if _response.get('error'):
-				response['status'] = False
-				response['error'] = _response.get('error')
-			else:
-				response['status'] = True
+			ollama.Client(host=OLLAMA_INSTANCE, timeout=60).delete(model_name)
+			return Response({'status': True})
 		except Exception as e:
-			response['error'] = str(e)
-		return Response(response)
-	
+			return Response({'status': False, 'error': str(e)})
+
 	def put(self, request):
-		req = self.request
-		model_name = req.query_params.get('model')
-		# check if model_name is in DEFAULT_GPT_MODELS
-		response = {
-			'status': False
-		}
-		use_ollama = True
-		if any(model['name'] == model_name for model in DEFAULT_GPT_MODELS):
-			use_ollama = False
+		model_name = request.query_params.get('model')
+		provider = request.query_params.get('provider')
+		if not model_name:
+			return Response({'status': False, 'error': 'Missing `model` parameter'}, status=HTTP_400_BAD_REQUEST)
+		valid = (LLM_PROVIDER_OPENAI, LLM_PROVIDER_ANTHROPIC, LLM_PROVIDER_OLLAMA)
+		if provider not in valid:
+			# Legacy clients don't send a provider: infer it from the name
+			if model_name.startswith('claude'):
+				provider = LLM_PROVIDER_ANTHROPIC
+			elif any(m['name'] == model_name for m in DEFAULT_OPENAI_MODELS) or model_name.startswith(('gpt-', 'o1', 'o3', 'o4')):
+				provider = LLM_PROVIDER_OPENAI
+			else:
+				provider = LLM_PROVIDER_OLLAMA
 		try:
 			OllamaSettings.objects.update_or_create(
+				id=1,
 				defaults={
 					'selected_model': model_name,
-					'use_ollama': use_ollama
+					'provider': provider,
+					'use_ollama': provider == LLM_PROVIDER_OLLAMA,
 				},
-				id=1
 			)
-			response['status'] = True
+			return Response({'status': True, 'provider': provider, 'model': model_name})
 		except Exception as e:
-			response['error'] = str(e)
-		return Response(response)
+			return Response({'status': False, 'error': str(e)})
 
 
 class GPTAttackSuggestion(APIView):
@@ -529,6 +519,9 @@ class ListTargetsDatatableViewSet(viewsets.ModelViewSet):
 	serializer_class = DomainSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		slug = self.request.GET.get('slug', None)
 		if slug:
 			self.queryset = self.queryset.filter(project__slug=slug)
@@ -1551,7 +1544,7 @@ class CMSDetector(APIView):
 		try:
 			# response = get_cms_details(url)
 			response = {}
-			cms_detector_command = f'python3 /usr/src/github/CMSeeK/cmseek.py'
+			cms_detector_command = f'{tool_python("/usr/src/github/CMSeeK")} /usr/src/github/CMSeeK/cmseek.py'
 			cms_detector_command += ' --random-agent --batch --follow-redirect'
 			cms_detector_command += f' -u {url}'
 
@@ -2041,6 +2034,9 @@ class IpAddressViewSet(viewsets.ModelViewSet):
 	serializer_class = IpSubdomainSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_id')
 
@@ -2065,6 +2061,9 @@ class SubdomainsViewSet(viewsets.ModelViewSet):
 	serializer_class = SubdomainSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_id')
 		if scan_id:
@@ -2093,6 +2092,9 @@ class SubdomainChangesViewSet(viewsets.ModelViewSet):
 	serializer_class = SubdomainChangesSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_id')
 		changes = req.query_params.get('changes')
@@ -2172,6 +2174,9 @@ class EndPointChangesViewSet(viewsets.ModelViewSet):
 	serializer_class = EndPointChangesSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_id')
 		changes = req.query_params.get('changes')
@@ -2240,6 +2245,9 @@ class InterestingSubdomainViewSet(viewsets.ModelViewSet):
 	serializer_class = SubdomainSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_id')
 		domain_id = req.query_params.get('target_id')
@@ -2294,6 +2302,9 @@ class InterestingEndpointViewSet(viewsets.ModelViewSet):
 	serializer_class = EndpointSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_id')
 		target_id = req.query_params.get('target_id')
@@ -2318,6 +2329,9 @@ class SubdomainDatatableViewSet(viewsets.ModelViewSet):
 	serializer_class = SubdomainSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_id')
 		target_id = req.query_params.get('target_id')
@@ -2574,6 +2588,9 @@ class ListActivityLogsViewSet(viewsets.ModelViewSet):
 	serializer_class = CommandSerializer
 	queryset = Command.objects.none()
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		activity_id = req.query_params.get('activity_id')
 		self.queryset = Command.objects.filter(activity__id=activity_id)
@@ -2584,6 +2601,9 @@ class ListScanLogsViewSet(viewsets.ModelViewSet):
 	serializer_class = CommandSerializer
 	queryset = Command.objects.none()
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_id')
 		self.queryset = Command.objects.filter(scan_history__id=scan_id)
@@ -2633,6 +2653,9 @@ class EndPointViewSet(viewsets.ModelViewSet):
 	serializer_class = EndpointSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 
 		scan_id = req.query_params.get('scan_history')
@@ -2876,6 +2899,9 @@ class DirectoryViewSet(viewsets.ModelViewSet):
 	serializer_class = DirectoryFileSerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_history')
 		subdomain_id = req.query_params.get('subdomain_id')
@@ -2904,6 +2930,9 @@ class VulnerabilityViewSet(viewsets.ModelViewSet):
 	serializer_class = VulnerabilitySerializer
 
 	def get_queryset(self):
+		# drf-yasg schema generation: no request params, skip the real query
+		if getattr(self, 'swagger_fake_view', False) and getattr(self, 'queryset', None) is not None:
+			return self.queryset.none()
 		req = self.request
 		scan_id = req.query_params.get('scan_history')
 		target_id = req.query_params.get('target_id')

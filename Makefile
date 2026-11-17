@@ -15,7 +15,7 @@ $(info Using: $(shell echo "$(DOCKER_COMPOSE)"))
 
 # --------------------------
 
-.PHONY: setup certs up build username pull down stop restart rm logs
+.PHONY: setup certs up build username pull down stop restart rm logs upgrade-db unit-test
 
 certs:		    ## Generate certificates.
 	@${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} -f docker-compose.setup.yml run --rm certs
@@ -38,6 +38,12 @@ endif
 
 changepassword:	## Change password for user
 	${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} ${COMPOSE_ALL_FILES} exec web python3 manage.py changepassword
+
+upgrade-db:		## One-time migration of PostgreSQL 12 data (reNgine <= 2.2) to PostgreSQL 17.
+	./scripts/upgrade_postgres.sh
+
+unit-test:		## Run the offline test suite inside the web container.
+	${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} ${COMPOSE_ALL_FILES} exec web python3 manage.py test tests.test_modernization
 
 migrate:		## Apply migrations
 	${COMPOSE_PREFIX_CMD} ${DOCKER_COMPOSE} ${COMPOSE_ALL_FILES} exec web python3 manage.py migrate

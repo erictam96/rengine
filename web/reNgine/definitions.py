@@ -456,46 +456,64 @@ FOUR_OH_FOUR_URL = '/404/'
 ###############################################################################
 # OLLAMA DEFINITIONS
 ###############################################################################
-OLLAMA_INSTANCE = 'http://ollama:11434'
+import os as _os
 
-DEFAULT_GPT_MODELS = [
-    {
-        'name': 'gpt-3',
-        'model': 'gpt-3',
+
+def tool_python(tool_dir):
+    """Python interpreter for a third-party tool cloned under /usr/src/github.
+
+    celery-entrypoint.sh installs each tool's requirements into
+    <tool_dir>/.venv; fall back to the system python3 for older installs.
+    """
+    venv_python = _os.path.join(tool_dir, '.venv', 'bin', 'python')
+    return venv_python if _os.path.exists(venv_python) else 'python3'
+
+
+def tool_executable(tool_dir, name):
+    """Console script installed in a tool venv (e.g. theHarvester)."""
+    path = _os.path.join(tool_dir, '.venv', 'bin', name)
+    return path if _os.path.exists(path) else None
+
+# Can be overridden to point at a remote Ollama / GPU host
+OLLAMA_INSTANCE = _os.environ.get('OLLAMA_INSTANCE', 'http://ollama:11434')
+
+# Optional: point the OpenAI provider at any OpenAI-compatible endpoint
+# (LM Studio, vLLM, OpenRouter, Azure proxy, ...). Empty = api.openai.com
+OPENAI_BASE_URL = _os.environ.get('OPENAI_BASE_URL', '') or None
+
+LLM_PROVIDER_OPENAI = 'openai'
+LLM_PROVIDER_ANTHROPIC = 'anthropic'
+LLM_PROVIDER_OLLAMA = 'ollama'
+
+DEFAULT_LLM_PROVIDER = LLM_PROVIDER_OPENAI
+DEFAULT_LLM_MODEL = 'gpt-5.4-mini'
+LLM_MAX_OUTPUT_TOKENS = 4096
+LLM_REQUEST_TIMEOUT = 300  # seconds; local CPU models are slow
+
+
+def _remote_model(name, family, provider):
+    return {
+        'name': name,
+        'model': name,
         'modified_at': '',
-        'details': {
-            'family': 'GPT',
-            'parameter_size': '~175B',
-        }
-    },
-    {
-        'name': 'gpt-3.5-turbo',
-        'model': 'gpt-3.5-turbo',
-        'modified_at': '',
-        'details': {
-            'family': 'GPT',
-            'parameter_size': '~7B',
-        }
-    },
-    {
-        'name': 'gpt-4',
-        'model': 'gpt-4',
-        'modified_at': '',
-        'details': {
-            'family': 'GPT',
-            'parameter_size': '~1.7T',
-        }
-    },
-    {
-        'name': 'gpt-4-turbo',
-        'model': 'gpt-4',
-        'modified_at': '',
-        'details': {
-            'family': 'GPT',
-            'parameter_size': '~1.7T',
-        }
+        'provider': provider,
+        'details': {'family': family, 'parameter_size': 'N/A'},
     }
+
+
+# Shown when the provider's live model list can't be fetched (no key yet,
+# network error). With a valid key the toolkit lists models from the API.
+DEFAULT_OPENAI_MODELS = [
+    _remote_model(m, 'GPT', LLM_PROVIDER_OPENAI)
+    for m in ('gpt-5.5', 'gpt-5.4-mini', 'gpt-5.4-nano')
 ]
+DEFAULT_ANTHROPIC_MODELS = [
+    _remote_model(m, 'Claude', LLM_PROVIDER_ANTHROPIC)
+    for m in ('claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5')
+]
+
+# Backwards-compatible alias
+DEFAULT_GPT_MODELS = DEFAULT_OPENAI_MODELS
 
 
 

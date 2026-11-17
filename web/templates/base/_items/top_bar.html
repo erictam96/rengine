@@ -195,10 +195,14 @@
           </a>
           {% endif %}
           <div class="dropdown-divider"></div>
-          <a href="{% url 'logout' %}" class="dropdown-item notify-item">
-            <i class="fe-log-out"></i>
-            <span>Logout</span>
-          </a>
+          {# Django 5 LogoutView only accepts POST #}
+          <form method="post" action="{% url 'logout' %}" class="m-0">
+            {% csrf_token %}
+            <button type="submit" class="dropdown-item notify-item">
+              <i class="fe-log-out"></i>
+              <span>Logout</span>
+            </button>
+          </form>
         </div>
       </li>
     </ul>

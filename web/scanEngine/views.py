@@ -464,36 +464,33 @@ def tool_arsenal_section(request, slug):
 
 @has_permission_decorator(PERM_MODIFY_SYSTEM_CONFIGURATIONS, redirect_url=FOUR_OH_FOUR_URL)
 def llm_toolkit_section(request, slug):
+    from reNgine.llm import (get_llm_selection, list_anthropic_models,
+                             list_ollama_models, list_openai_models)
     context = {}
-    list_all_models_url = f'{OLLAMA_INSTANCE}/api/tags'
-    response = requests.get(list_all_models_url)
-    all_models = []
-    selected_model = None
-    all_models = DEFAULT_GPT_MODELS.copy()
-    if response.status_code == 200:
-        models = response.json()
-        ollama_models = models.get('models')
-        date_format = "%Y-%m-%dT%H:%M:%S"
-        for model in ollama_models:
-           all_models.append({**model, 
-                'modified_at': datetime.strptime(model['modified_at'].split('.')[0], date_format),
-                'is_local': True,
-            })
-    # find selected model name from db
-    selected_model = OllamaSettings.objects.first()
-    if selected_model:
-        selected_model = {'selected_model': selected_model.selected_model}
-    else:
-        # use gpt3.5-turbo as default
-        selected_model = {'selected_model': 'gpt-3.5-turbo'}
+    openai_models = list_openai_models()
+    context['openai_live'] = bool(openai_models)
+    anthropic_models = list_anthropic_models()
+    context['anthropic_live'] = bool(anthropic_models)
+    ollama_models = list_ollama_models()
+    context['ollama_reachable'] = bool(ollama_models)
+
+    all_models = (
+        [dict(m) for m in (anthropic_models or DEFAULT_ANTHROPIC_MODELS)]
+        + [dict(m) for m in (openai_models or DEFAULT_OPENAI_MODELS)]
+        + ollama_models
+    )
+    provider, model_name = get_llm_selection()
     for model in all_models:
-        if model['name'] == selected_model['selected_model']:
+        if model['name'] == model_name and model.get('provider') == provider:
             model['selected'] = True
     context['installed_models'] = all_models
-    # show error message for openai key, if any gpt is selected
-    openai_key = get_open_ai_key()
-    if not openai_key and 'gpt' in selected_model['selected_model']:
+    context['selected_provider'] = provider
+    context['selected_model'] = model_name
+    context['ollama_instance'] = OLLAMA_INSTANCE
+    if provider == LLM_PROVIDER_OPENAI and not get_open_ai_key() and not OPENAI_BASE_URL:
         context['openai_key_error'] = True
+    if provider == LLM_PROVIDER_ANTHROPIC and not get_anthropic_key():
+        context['anthropic_key_error'] = True
     return render(request, 'scanEngine/settings/llm_toolkit.html', context)
 
 
@@ -502,6 +499,7 @@ def api_vault(request, slug):
     context = {}
     if request.method == "POST":
         key_openai = request.POST.get('key_openai')
+        key_anthropic = request.POST.get('key_anthropic')
         key_netlas = request.POST.get('key_netlas')
         key_chaos = request.POST.get('key_chaos')
         key_hackerone = request.POST.get('key_hackerone')
@@ -515,6 +513,9 @@ def api_vault(request, slug):
                 openai_api_key.save()
             else:
                 OpenAiAPIKey.objects.create(key=key_openai)
+
+        if key_anthropic:
+            AnthropicAPIKey.objects.update_or_create(id=1, defaults={'key': key_anthropic})
 
         if key_netlas:
             netlas_api_key = NetlasAPIKey.objects.first()
@@ -556,6 +557,7 @@ def api_vault(request, slug):
         hackerone_username = None
 
     context['openai_key'] = openai_key
+    context['anthropic_key'] = AnthropicAPIKey.objects.first()
     context['netlas_key'] = netlas_key
     context['chaos_key'] = chaos_key
     context['hackerone_key'] = hackerone_key
