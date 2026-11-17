@@ -302,3 +302,14 @@ class LLMVulnerabilityTaskTests(TestCase):
 		self.assertEqual(vuln.description, 'original')
 		self.assertFalse(vuln.is_gpt_used)
 		self.assertFalse(GPTVulnerabilityReport.objects.exists())
+
+
+class CommandBuilderTests(TestCase):
+
+	def test_no_glued_header_flags(self):
+		"""Custom headers used to be appended without a separating space."""
+		import inspect
+		import reNgine.tasks as t
+		src = inspect.getsource(t)
+		self.assertNotIn('cmd += formatted_headers', src)
+		self.assertNotIn("' -fr' if follow_redirect", src)
