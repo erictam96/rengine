@@ -17,14 +17,14 @@ ENV DEBIAN_FRONTEND="noninteractive" \
     DATABASE="postgres" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    # Ubuntu 24.04 marks the system Python as externally managed (PEP 668).
-    # reNgine owns this container, so installing into it is intended.
-    PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_NO_CACHE_DIR=1 \
+    # Ubuntu 24.04's system Python is externally managed (PEP 668), so
+    # reNgine gets its own virtualenv, first on PATH (python3 / pip3).
+    VIRTUAL_ENV=/opt/venv \
     GOROOT="/usr/local/go" \
     GOPATH="/go" \
     GO111MODULE=on
-ENV PATH="${PATH}:${GOROOT}/bin:${GOPATH}/bin"
+ENV PATH="/opt/venv/bin:${PATH}:${GOROOT}/bin:${GOPATH}/bin"
 
 # Fail early on unsupported architectures
 RUN ARCH=$(dpkg --print-architecture) \
@@ -58,7 +58,8 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     wget \
     x11-utils \
     xvfb \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/venv
 
 # Firefox (non-snap) for EyeWitness screenshots
 RUN add-apt-repository -y ppa:mozillateam/ppa \
@@ -119,7 +120,7 @@ RUN nuclei -update-templates && chaos -update || true
 
 # Python requirements
 COPY ./requirements.txt /tmp/requirements.txt
-RUN pip3 install --upgrade "setuptools<81" wheel \
+RUN pip3 install --upgrade pip "setuptools<81" wheel \
     && pip3 install -r /tmp/requirements.txt
 
 # EyeWitness dependencies
