@@ -1,5 +1,5 @@
 import re
-import validators
+from reNgine import validators_compat as validators
 import logging
 
 from urllib.parse import urlparse

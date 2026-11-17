@@ -118,6 +118,11 @@
                     <small class="text-muted">Used for generating vulnerability descriptions, remediation, impact, and report writing using ChatGPT.</small>
                   </div>
                   <div class="mb-3">
+                    <label for="key_anthropic" class="form-label">Anthropic (Claude) Key</label>
+                    <input class="form-control" type="password" id="key_anthropic" name="key_anthropic" placeholder="Enter Anthropic API Key" value="{{anthropic_key|default_if_none:''}}">
+                    <small class="text-muted">Used when a Claude model is selected in the LLM Toolkit.</small>
+                  </div>
+                  <div class="mb-3">
                     <label for="key_netlas" class="form-label">Netlas Key</label>
                     <input class="form-control" type="text" id="key_netlas" name="key_netlas" placeholder="Enter Netlas Key" value="{{netlas_key}}">
                     <small class="text-muted">Used to get whois information and other OSINT data.</small>

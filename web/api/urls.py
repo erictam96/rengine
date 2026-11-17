@@ -1,4 +1,4 @@
-from django.conf.urls import include, url
+from django.urls import include, re_path
 from django.urls import path
 from rest_framework import routers
 
@@ -6,24 +6,24 @@ from .views import *
 
 app_name = 'api'
 router = routers.DefaultRouter()
-router.register(r'listDatatableSubdomain', SubdomainDatatableViewSet)
-router.register(r'listTargets', ListTargetsDatatableViewSet)
-router.register(r'listSubdomains', SubdomainsViewSet)
-router.register(r'listEndpoints', EndPointViewSet)
-router.register(r'listDirectories', DirectoryViewSet)
-router.register(r'listVulnerability', VulnerabilityViewSet)
-router.register(r'listInterestingSubdomains', InterestingSubdomainViewSet)
-router.register(r'listInterestingEndpoints', InterestingEndpointViewSet)
-router.register(r'listSubdomainChanges', SubdomainChangesViewSet)
-router.register(r'listEndPointChanges', EndPointChangesViewSet)
-router.register(r'listIps', IpAddressViewSet)
-router.register(r'listActivityLogs', ListActivityLogsViewSet)
-router.register(r'listScanLogs', ListScanLogsViewSet)
+router.register(r'listDatatableSubdomain', SubdomainDatatableViewSet, basename='listDatatableSubdomain')
+router.register(r'listTargets', ListTargetsDatatableViewSet, basename='listTargets')
+router.register(r'listSubdomains', SubdomainsViewSet, basename='listSubdomains')
+router.register(r'listEndpoints', EndPointViewSet, basename='listEndpoints')
+router.register(r'listDirectories', DirectoryViewSet, basename='listDirectories')
+router.register(r'listVulnerability', VulnerabilityViewSet, basename='listVulnerability')
+router.register(r'listInterestingSubdomains', InterestingSubdomainViewSet, basename='listInterestingSubdomains')
+router.register(r'listInterestingEndpoints', InterestingEndpointViewSet, basename='listInterestingEndpoints')
+router.register(r'listSubdomainChanges', SubdomainChangesViewSet, basename='listSubdomainChanges')
+router.register(r'listEndPointChanges', EndPointChangesViewSet, basename='listEndPointChanges')
+router.register(r'listIps', IpAddressViewSet, basename='listIps')
+router.register(r'listActivityLogs', ListActivityLogsViewSet, basename='listActivityLogs')
+router.register(r'listScanLogs', ListScanLogsViewSet, basename='listScanLogs')
 router.register(r'notifications', InAppNotificationManagerViewSet, basename='notification')
 router.register(r'hackerone-programs', HackerOneProgramViewSet, basename='hackerone_program')
 
 urlpatterns = [
-    url('^', include(router.urls)),
+    re_path('^', include(router.urls)),
     path(
         'add/target/',
         AddTarget.as_view(),

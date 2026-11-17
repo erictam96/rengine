@@ -3,36 +3,11 @@
 # apply existing migrations
 python3 manage.py migrate
 
-# make migrations for specific apps
-apps=(
-    "targetApp"
-    "scanEngine"
-    "startScan"
-    "dashboard"
-    "recon_note"
-)
-
-create_migrations() {
-    local app=$1
-    echo "Creating migrations for $app..."
-    python3 manage.py makemigrations $app
-    echo "Finished creating migrations for $app"
-    echo "----------------------------------------"
-}
-
-echo "Starting migration creation process..."
-
-for app in "${apps[@]}"
-do
-    create_migrations $app
-done
-
-echo "Migration creation process completed."
-
-# apply migrations again
-echo "Applying migrations..."
-python3 manage.py migrate
-echo "Migration process completed."
+# Migrations ship with the source code. Generating them at runtime
+# (as earlier versions did) produced unreviewed, install-specific
+# migrations that conflict with upstream ones on update.
+python3 manage.py makemigrations --check --dry-run > /dev/null 2>&1 || \
+  echo "WARNING: models and migrations are out of sync. Run 'make migrations' in a dev checkout and commit the result."
 
 
 python3 manage.py collectstatic --no-input --clear
@@ -42,24 +17,19 @@ python3 manage.py loaddata fixtures/default_scan_engines.yaml --app scanEngine.E
 python3 manage.py loaddata fixtures/default_keywords.yaml --app scanEngine.InterestingLookupModel
 python3 manage.py loaddata fixtures/external_tools.yaml --app scanEngine.InstalledExternalTool
 
-# install firefox https://askubuntu.com/a/1404401
-echo '
-Package: *
-Pin: release o=LP-PPA-mozillateam
-Pin-Priority: 1001
+# Firefox is installed in the image (see Dockerfile).
 
-Package: firefox
-Pin: version 1:1snap1-0ubuntu2
-Pin-Priority: -1
-' | tee /etc/apt/preferences.d/mozilla-firefox
-apt update
-apt install firefox -y
-
-# Temporary fix for whatportis bug - See https://github.com/yogeshojha/rengine/issues/984
-sed -i 's/purge()/truncate()/g' /usr/local/lib/python3.10/dist-packages/whatportis/cli.py
-
-# update whatportis
-yes | whatportis --update
+# Third-party Python tools get their own virtualenv so their pinned
+# dependencies can't break reNgine's (or each other's).
+# usage: tool_venv <tool_dir> [pip args...]
+tool_venv() {
+  local dir=$1; shift
+  if [ ! -x "$dir/.venv/bin/python" ]; then
+    python3 -m venv "$dir/.venv"
+  fi
+  "$dir/.venv/bin/python" -m pip install -q --upgrade pip
+  "$dir/.venv/bin/python" -m pip install -q "$@" || echo "WARNING: dependency install failed for $dir"
+}
 
 # clone dirsearch default wordlist
 if [ ! -d "/usr/src/wordlist" ]
@@ -87,7 +57,7 @@ then
   echo "Cloning Sublist3r"
   git clone https://github.com/aboul3la/Sublist3r /usr/src/github/Sublist3r
 fi
-python3 -m pip install -r /usr/src/github/Sublist3r/requirements.txt
+tool_venv /usr/src/github/Sublist3r -r /usr/src/github/Sublist3r/requirements.txt
 
 # clone OneForAll
 if [ ! -d "/usr/src/github/OneForAll" ]
@@ -95,7 +65,7 @@ then
   echo "Cloning OneForAll"
   git clone https://github.com/shmilylty/OneForAll /usr/src/github/OneForAll
 fi
-python3 -m pip install -r /usr/src/github/OneForAll/requirements.txt
+tool_venv /usr/src/github/OneForAll -r /usr/src/github/OneForAll/requirements.txt
 
 # clone eyewitness
 if [ ! -d "/usr/src/github/EyeWitness" ]
@@ -105,13 +75,27 @@ then
   # pip install -r /usr/src/github/Eyewitness/requirements.txt
 fi
 
-# clone theHarvester
+# clone theHarvester (pinned: newer releases require Python >= 3.14)
+THEHARVESTER_VERSION=4.11.1
+if [ -d "/usr/src/github/theHarvester" ] && [ ! -f "/usr/src/github/theHarvester/pyproject.toml" -o "$(git -C /usr/src/github/theHarvester describe --tags 2>/dev/null)" != "$THEHARVESTER_VERSION" ]
+then
+  echo "Replacing outdated theHarvester checkout (keeping api-keys.yaml)"
+  [ -f /usr/src/github/theHarvester/api-keys.yaml ] && cp /usr/src/github/theHarvester/api-keys.yaml /tmp/theHarvester-api-keys.yaml
+  rm -rf /usr/src/github/theHarvester
+fi
 if [ ! -d "/usr/src/github/theHarvester" ]
 then
-  echo "Cloning theHarvester"
-  git clone https://github.com/laramies/theHarvester /usr/src/github/theHarvester
+  echo "Cloning theHarvester $THEHARVESTER_VERSION"
+  git clone --depth 1 --branch $THEHARVESTER_VERSION https://github.com/laramies/theHarvester /usr/src/github/theHarvester
 fi
-python3 -m pip install -r /usr/src/github/theHarvester/requirements/base.txt
+[ -f /tmp/theHarvester-api-keys.yaml ] && mv /tmp/theHarvester-api-keys.yaml /usr/src/github/theHarvester/api-keys.yaml
+tool_venv /usr/src/github/theHarvester /usr/src/github/theHarvester
+# reNgine edits api-keys.yaml / proxies.yaml in the checkout root;
+# theHarvester 4.x reads them from ~/.theHarvester
+for f in api-keys.yaml proxies.yaml; do
+  [ -f "/usr/src/github/theHarvester/$f" ] || cp "/usr/src/github/theHarvester/theHarvester/data/$f" "/usr/src/github/theHarvester/$f"
+done
+ln -sfn /usr/src/github/theHarvester ~/.theHarvester
 
 # clone vulscan
 if [ ! -d "/usr/src/github/scipag_vulscan" ]
@@ -123,15 +107,17 @@ then
   echo "Usage in reNgine, set vulscan/vulscan.nse in nmap_script scanEngine port_scan config parameter"
 fi
 
-# install h8mail
-python3 -m pip install h8mail
+# install h8mail in its own venv, exposed on PATH
+mkdir -p /opt/h8mail
+tool_venv /opt/h8mail h8mail
+ln -sf /opt/h8mail/.venv/bin/h8mail /usr/local/bin/h8mail
 
 # install gf patterns
 if [ ! -d "/root/Gf-Patterns" ];
 then
   echo "Installing GF Patterns"
-  mkdir ~/.gf
-  cp -r $GOPATH/src/github.com/tomnomnom/gf/examples/*.json ~/.gf
+  mkdir -p ~/.gf
+  git clone --depth 1 https://github.com/tomnomnom/gf /tmp/gf-src && cp /tmp/gf-src/examples/*.json ~/.gf && rm -rf /tmp/gf-src
   git clone https://github.com/1ndianl33t/Gf-Patterns ~/Gf-Patterns
   mv ~/Gf-Patterns/*.json ~/.gf
 fi
@@ -166,8 +152,8 @@ if [ ! -d "/usr/src/github/CMSeeK" ]
 then
   echo "Cloning CMSeeK"
   git clone https://github.com/Tuhinshubhra/CMSeeK /usr/src/github/CMSeeK
-  pip install -r /usr/src/github/CMSeeK/requirements.txt
 fi
+tool_venv /usr/src/github/CMSeeK -r /usr/src/github/CMSeeK/requirements.txt
 
 # clone ctfr
 if [ ! -d "/usr/src/github/ctfr" ]
@@ -175,6 +161,7 @@ then
   echo "Cloning CTFR"
   git clone https://github.com/UnaPibaGeek/ctfr /usr/src/github/ctfr
 fi
+tool_venv /usr/src/github/ctfr -r /usr/src/github/ctfr/requirements.txt
 
 # clone gooFuzz
 if [ ! -d "/usr/src/github/goofuzz" ]
@@ -186,12 +173,6 @@ fi
 
 # httpx seems to have issue, use alias instead!!!
 echo 'alias httpx="/go/bin/httpx"' >> ~/.bashrc
-
-# TEMPORARY FIX, httpcore is causing issues with celery, removing it as temp fix
-#python3 -m pip uninstall -y httpcore
-
-# TEMPORARY FIX FOR langchain
-pip install tenacity==8.2.2
 
 loglevel='info'
 if [ "$DEBUG" == "1" ]; then

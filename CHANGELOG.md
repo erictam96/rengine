@@ -1,5 +1,38 @@
 # Changelog
 
+## v2.3.0 (unreleased)
+
+> **Upgrading from v2.2.x?** PostgreSQL moves from 12 to 17. Run `make upgrade-db` once after pulling, before `make up`. See [UPGRADING.md](UPGRADING.md).
+
+### Platform
+- Django 3.2 (end of life since April 2024) → **Django 5.2 LTS** (supported until April 2028), DRF 3.16+, Celery 5.5+
+- Docker base image Ubuntu 22.04 → **24.04 / Python 3.12**; Go 1.21 → **1.27**, which current ProjectDiscovery tools require
+- PostgreSQL 12 (end of life) → **17**, with a non-destructive migration script
+- Recon tools pinned to explicit versions (nuclei 3.11.1, httpx 1.12.0, subfinder 2.17.0, naabu 2.7.0, katana 1.8.0, tlsx 1.4.6, ffuf 2.3.0, dalfox 2.13.0 …) for reproducible builds
+- Third-party Python tools (Sublist3r, OneForAll, theHarvester, CMSeeK, ctfr, h8mail) now run in isolated virtualenvs, so their pinned dependencies can no longer break reNgine
+- theHarvester pinned to 4.11.1, because newer releases need Python 3.14 and dropped `theHarvester.py`
+- Migrations ship with the code; containers no longer run `makemigrations` at startup
+
+### LLM features
+- New provider layer supporting **OpenAI** (SDK v1+), **Anthropic Claude** and **Ollama**
+- Any OpenAI-compatible server (LM Studio, vLLM, OpenRouter…) through `OPENAI_BASE_URL`; remote Ollama hosts through `OLLAMA_INSTANCE`
+- LLM Toolkit lists live models from each provider's API and shows which provider each model uses; the Anthropic key can be set in the API Vault and onboarding
+- The vulnerability report parser now accepts markdown-formatted model output
+- A failed LLM call no longer overwrites a vulnerability's impact and remediation with empty values
+- Ollama model downloads use POST instead of GET; the inverted success/error check on model deletion is fixed
+
+### Fixes
+- CVE enrichment for nmap vulners results was broken: CIRCL changed its API format and `pycvesearch` no longer imports. It now uses NVD API 2.0 with CIRCL as fallback (`NVD_API_KEY` is optional)
+- Replaced `whatportis`, which pinned a vulnerable `requests==2.25.1`, with nmap's service database
+- Every tool command (nuclei, dalfox, crlfuzz, ffuf, gospider, katana, hakrawler) broke when custom headers were set: the headers were glued onto the previous flag
+- ffuf "follow redirects" passed `-fr` (filter regex) instead of `-r`
+- `/scan/detail/vuln/<id>` crashed, and the 404 page crashed when no project slug was in the URL
+- The Dockerfile architecture check never worked (`!` instead of `!=`)
+- `validators` compatibility shim, so IP/CIDR and underscore-domain handling keeps its old behaviour
+
+### Development
+- Offline test suite (`make unit-test`) and a GitHub Actions workflow (Django check, migration check, tests)
+
 ## v2.2.0
 
 ## What's Changed

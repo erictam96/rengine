@@ -28,8 +28,11 @@ LLM Toolkit (Beta)
           <br>
           If you are using custom LLM models, it is expected that response time are much slower in CPU. We recommend using GPU for better performance. Models such as llama2, or llama3 requires significant computation and GPU are required. <b>Having only CPU will result in slow response time.</b>
           <br>
-          <b>OpenAI GPT models do not run locally, hence the requirement of GPU is not necessary.</b>
+          <b>OpenAI and Anthropic Claude models run in the cloud, so no local GPU is needed.</b> Add their API keys in the <a href="/scanEngine/{{current_project.slug}}/api_vault">API Vault</a>.
+          <br>
+          To use another OpenAI-compatible server (LM Studio, vLLM, OpenRouter, ...), set <code>OPENAI_BASE_URL</code> in <code>.env</code>. To use a remote Ollama host, set <code>OLLAMA_INSTANCE</code> (currently <code>{{ollama_instance}}</code>).
         </p>
+        <p class="mb-0">Currently selected: <span class="badge bg-soft-primary text-primary">{{selected_provider}}</span> <b>{{selected_model}}</b></p>
       </div>
     </div>
   </div>
@@ -44,6 +47,16 @@ LLM Toolkit (Beta)
     <b>Warning:</b> GPT model is currently selected and requires API key to be set. Please set the API key in the <a href="/scanEngine/{{current_project.slug}}/api_vault" target="_blank"> API Vault.</a>
   </div>
   {% endif %}
+  {% if anthropic_key_error %}
+  <div class="alert alert-danger border-0 mb-3 mt-3" role="alert">
+    <b>Warning:</b> A Claude model is currently selected and requires an Anthropic API key. Please set it in the <a href="/scanEngine/{{current_project.slug}}/api_vault" target="_blank"> API Vault.</a>
+  </div>
+  {% endif %}
+  {% if not ollama_reachable %}
+  <div class="alert alert-warning border-0 mb-3 mt-3" role="alert">
+    Ollama at <code>{{ollama_instance}}</code> is not reachable or has no models installed. Local models will appear here once Ollama is running.
+  </div>
+  {% endif %}
   <div class="row mt-2">
     {% for model in installed_models %}
     <div class="col-lg-4">
@@ -55,10 +68,10 @@ LLM Toolkit (Beta)
             </a>
             <div class="dropdown-menu dropdown-menu-end">
               {% if model.is_local %}
-                <a class="dropdown-item" href="#" onClick=deleteModel('{{model.name}}')>Delete</a>
+                <a class="dropdown-item" href="#" onClick="deleteModel('{{model.name|escapejs}}')">Delete</a>
               {% endif %}
               {% if not model.selected %}
-                <a class="dropdown-item" href="#" onClick=selectModel('{{model.name}}')>Use Model</a>
+                <a class="dropdown-item" href="#" onClick="selectModel('{{model.name|escapejs}}', '{{model.provider|escapejs}}')">Use Model</a>
               {% endif %}
             </div>
           </div>
@@ -74,10 +87,12 @@ LLM Toolkit (Beta)
             <br>
             <span class="pe-2 text-nowrap mb-2 d-inline-block">
               <i class="mdi mdi-database text-info"></i>
-              {% if model.is_local %}
-              Locally installed model
+              {% if model.provider == 'ollama' %}
+              Locally installed model (Ollama)
+              {% elif model.provider == 'anthropic' %}
+              Anthropic Claude model{% if not anthropic_live %} <small class="text-muted">(default list)</small>{% endif %}
               {% else %}
-              Open AI Model
+              OpenAI model{% if not openai_live %} <small class="text-muted">(default list)</small>{% endif %}
               {% endif %}
             </span>
             <br>
@@ -106,9 +121,7 @@ LLM Toolkit (Beta)
 {% block page_level_script %}
 <script type="text/javascript">
   function deleteModel(model_name) {
-    // split model name by : and only use first part
-    model_name = model_name.split(':')[0];
-    var url = "/api/tool/ollama/?model=" + model_name;
+    var url = "/api/tool/ollama/?model=" + encodeURIComponent(model_name);
     swal.queue([{
       title: 'Are you sure you want to delete this model?',
       text: "This action can not be undone.",
@@ -127,10 +140,11 @@ LLM Toolkit (Beta)
         }).then(function(response) {
           return response.json();
         }).then(function(data) {
-          if (data.status){
+          if (!data.status){
             swal.insertQueueStep({
               icon: 'error',
-              title: 'Oops! Unable to delete the model!'
+              title: 'Oops! Unable to delete the model!',
+              text: data.error || ''
             })
           }
           else{
@@ -162,10 +176,10 @@ LLM Toolkit (Beta)
     $('#modal-content').empty();
     $('#modal-content').append(`
       <p>You can find the list of supported models in <a href="https://ollama.com/library" target="_blank">Ollama Library</a></p>
-      <p>We recommend using llama2-uncensored model for better results.</p>
+      <p>Recent general-purpose models such as <code>llama3.1</code>, <code>qwen2.5</code> or <code>mistral</code> work well.</p>
       <div class="mb-3">
         <label for="model_name" class="form-label">Model name</label>
-        <input class="form-control" type="text" id="model_name" required="" placeholder="llama2">
+        <input class="form-control" type="text" id="model_name" required="" placeholder="llama3.1">
       </div>
       <div class="mb-3 text-center">
         <button class="btn btn-primary float-end" type="submit" onclick="download_model()">Download Model</button>
@@ -184,7 +198,7 @@ LLM Toolkit (Beta)
       });
       return;
     }
-    var url = "/api/tool/ollama/?model=" + model_name;
+    var url = "/api/tool/ollama/?model=" + encodeURIComponent(model_name);
     swal.queue([{
       title: 'Are you sure you want to download this model?',
       text: "Downloading models can take a long time, sometimes a few minutes. Please be patient.",
@@ -195,7 +209,7 @@ LLM Toolkit (Beta)
       showLoaderOnConfirm: true,
       preConfirm: function() {
         return fetch(url, {
-          method: 'GET',
+          method: 'POST',
           credentials: "same-origin",
           headers: {
             "X-CSRFToken": getCookie("csrftoken")
@@ -206,7 +220,8 @@ LLM Toolkit (Beta)
           if (!data.status){
             swal.insertQueueStep({
               icon: 'error',
-              title: 'Oops! Unable to download the model, model does not exist!'
+              title: 'Oops! Unable to download the model!',
+              text: data.error || 'Model may not exist in the Ollama library.'
             })
           }
           else{
@@ -233,8 +248,8 @@ LLM Toolkit (Beta)
     }])
   }
 
-  function selectModel(model_name){
-    var url = "/api/tool/ollama/?model=" + model_name;
+  function selectModel(model_name, provider){
+    var url = "/api/tool/ollama/?model=" + encodeURIComponent(model_name) + "&provider=" + encodeURIComponent(provider || '');
     swal.queue([{
       title: 'Are you sure you want to select this model?',
       text: "This model will be used to generate Scan Reports and Attack Suggestions.",

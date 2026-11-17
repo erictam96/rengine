@@ -4,11 +4,14 @@ from django.conf import settings
 
 def projects(request):
     projects = Project.objects.all()
-    try:
+    slug = None
+    if getattr(request, 'resolver_match', None):
         slug = request.resolver_match.kwargs.get('slug')
-        project = Project.objects.get(slug=slug)
-    except Exception:
-        project = None
+    project = Project.objects.filter(slug=slug).first() if slug else None
+    if project is None:
+        # Pages without a project in the URL (e.g. 404) still render the
+        # navigation, which needs a project slug.
+        project = projects.order_by('id').first()
     return {
         'projects': projects,
         'current_project': project

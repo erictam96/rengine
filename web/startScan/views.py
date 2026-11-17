@@ -236,10 +236,12 @@ def all_subdomains(request, slug):
     }
     return render(request, 'startScan/subdomains.html', context)
 
-def detail_vuln_scan(request, slug, id=None):
+def detail_vuln_scan(request, slug=None, id=None):
     if id:
-        history = get_object_or_404(ScanHistory, id=id)
-        history.filter(domain__project__slug=slug)
+        filters = {'id': id}
+        if slug:
+            filters['domain__project__slug'] = slug
+        history = get_object_or_404(ScanHistory, **filters)
         context = {'scan_history_id': id, 'history': history}
     else:
         context = {'vuln_scan_active': 'true'}

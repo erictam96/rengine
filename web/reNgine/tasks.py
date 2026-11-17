@@ -4,7 +4,7 @@ import os
 import pprint
 import subprocess
 import time
-import validators
+from reNgine import validators_compat as validators
 import xmltodict
 import yaml
 import tldextract
@@ -21,7 +21,7 @@ from django.db.models import Count
 from dotted_dict import DottedDict
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
-from pycvesearch import CVESearch
+from reNgine.cve_lookup import lookup_cve, cvss_to_severity
 from metafinder.extractor import extract_metadata_from_google_search
 
 from reNgine.celery import app
@@ -461,7 +461,7 @@ def subdomain_discovery(
 				cmd += f' -brute -w {wordlist_path}'
 
 			elif tool == 'sublist3r':
-				cmd = f'python3 /usr/src/github/Sublist3r/sublist3r.py -d {host} -t {threads} -o {self.results_dir}/subdomains_sublister.txt'
+				cmd = f'{tool_python("/usr/src/github/Sublist3r")} /usr/src/github/Sublist3r/sublist3r.py -d {host} -t {threads} -o {self.results_dir}/subdomains_sublister.txt'
 
 			elif tool == 'subfinder':
 				cmd = f'subfinder -d {host} -o {self.results_dir}/subdomains_subfinder.txt'
@@ -473,14 +473,14 @@ def subdomain_discovery(
 				cmd += f' -silent'
 
 			elif tool == 'oneforall':
-				cmd = f'python3 /usr/src/github/OneForAll/oneforall.py --target {host} run'
+				cmd = f'{tool_python("/usr/src/github/OneForAll")} /usr/src/github/OneForAll/oneforall.py --target {host} run'
 				cmd_extract = f'cut -d\',\' -f6 /usr/src/github/OneForAll/results/{host}.csv | tail -n +2 > {self.results_dir}/subdomains_oneforall.txt'
 				cmd_rm = f'rm -rf /usr/src/github/OneForAll/results/{host}.csv'
 				cmd += f' && {cmd_extract} && {cmd_rm}'
 
 			elif tool == 'ctfr':
 				results_file = self.results_dir + '/subdomains_ctfr.txt'
-				cmd = f'python3 /usr/src/github/ctfr/ctfr.py -d {host} -o {results_file}'
+				cmd = f'{tool_python("/usr/src/github/ctfr")} /usr/src/github/ctfr/ctfr.py -d {host} -o {results_file}'
 				cmd_extract = f"cat {results_file} | sed 's/\*.//g' | tail -n +12 | uniq | sort > {results_file}"
 				cmd += f' && {cmd_extract}'
 
@@ -1053,7 +1053,11 @@ def theHarvester(config, host, scan_history_id, activity_id, results_dir, ctx={}
 	output_path_json = f'{results_dir}/theHarvester.json'
 	theHarvester_dir = '/usr/src/github/theHarvester'
 	history_file = f'{results_dir}/commands.txt'
-	cmd  = f'python3 {theHarvester_dir}/theHarvester.py -d {host} -b all -f {output_path_json}'
+	harvester_bin = tool_executable(theHarvester_dir, 'theHarvester')
+	if harvester_bin:  # theHarvester 4.x (pip-installed into its venv)
+		cmd = f'{harvester_bin} -d {host} -b all -f {output_path_json}'
+	else:  # legacy 3.x checkout
+		cmd = f'python3 {theHarvester_dir}/theHarvester.py -d {host} -b all -f {output_path_json}'
 
 	# Update proxies.yaml
 	proxy_query = Proxy.objects.all()
@@ -1678,12 +1682,12 @@ def dir_file_fuzz(self, ctx={}, description=None):
 	cmd += f' -t {threads}' if threads and threads > 0 else ''
 	cmd += f' -timeout {timeout}' if timeout and timeout > 0 else ''
 	cmd += ' -se' if stop_on_error else ''
-	cmd += ' -fr' if follow_redirect else ''
+	cmd += ' -r' if follow_redirect else ''  # ffuf: -r follows redirects (-fr is "filter regex")
 	cmd += ' -ac' if auto_calibration else ''
 	cmd += f' -mc {mc}' if mc else ''
 	formatted_headers = ' '.join(f'-H "{header}"' for header in custom_headers)
 	if formatted_headers:
-		cmd += formatted_headers
+		cmd += ' ' + formatted_headers
 
 	# Grab URLs to fuzz
 	urls = get_http_urls(
@@ -1880,9 +1884,10 @@ def fetch_url(self, urls=[], ctx={}, description=None):
 	if custom_headers:
 		# gau, waybackurls does not support custom headers
 		formatted_headers = ' '.join(f'-H "{header}"' for header in custom_headers)
-		cmd_map['gospider'] += formatted_headers
-		cmd_map['hakrawler'] += ';;'.join(header for header in custom_headers)
-		cmd_map['katana'] += formatted_headers
+		cmd_map['gospider'] += ' ' + formatted_headers
+		hakrawler_headers = ';;'.join(header for header in custom_headers)
+		cmd_map['hakrawler'] += f' -h "{hakrawler_headers}"'
+		cmd_map['katana'] += ' ' + formatted_headers
 	cat_input = f'cat {input_path}'
 	grep_output = f'grep -Eo {host_regex}'
 	cmd_map = {
@@ -2483,7 +2488,7 @@ def nuclei_scan(self, urls=[], ctx={}, description=None):
 	cmd += f' -irr'
 	formatted_headers = ' '.join(f'-H "{header}"' for header in custom_headers)
 	if formatted_headers:
-		cmd += formatted_headers
+		cmd += ' ' + formatted_headers
 	cmd += f' -l {input_path}'
 	cmd += f' -c {str(concurrency)}' if concurrency > 0 else ''
 	cmd += f' -proxy {proxy} ' if proxy else ''
@@ -2579,7 +2584,7 @@ def dalfox_xss_scan(self, urls=[], ctx={}, description=None):
 	cmd += f' --timeout {timeout}' if timeout else ''
 	formatted_headers = ' '.join(f'-H "{header}"' for header in custom_headers)
 	if formatted_headers:
-		cmd += formatted_headers
+		cmd += ' ' + formatted_headers
 	cmd += f' --user-agent {user_agent}' if user_agent else ''
 	cmd += f' --worker {threads}' if threads else ''
 	cmd += f' --format json'
@@ -2705,7 +2710,7 @@ def crlfuzz_scan(self, urls=[], ctx={}, description=None):
 	cmd += f' -x {proxy}' if proxy else ''
 	formatted_headers = ' '.join(f'-H "{header}"' for header in custom_headers)
 	if formatted_headers:
-		cmd += formatted_headers
+		cmd += ' ' + formatted_headers
 	cmd += f' -o {output_path}'
 
 	run_command(
@@ -2906,7 +2911,7 @@ def http_crawl(
 	cmd += f' --http-proxy {proxy}' if proxy else ''
 	formatted_headers = ' '.join(f'-H "{header}"' for header in custom_headers)
 	if formatted_headers:
-		cmd += formatted_headers
+		cmd += ' ' + formatted_headers
 	cmd += f' -json'
 	cmd += f' -u {urls[0]}' if len(urls) == 1 else f' -l {input_path}'
 	cmd += f' -x {method}' if method else ''
@@ -3569,56 +3574,31 @@ def parse_nmap_vulners_output(script_output, url=''):
 
 
 def cve_to_vuln(cve_id, vuln_type=''):
-	"""Search for a CVE using CVESearch and return Vulnerability data.
+	"""Look up a CVE (NVD, then CIRCL) and return Vulnerability data.
 
 	Args:
 		cve_id (str): CVE ID in the form CVE-*
 
 	Returns:
-		dict: Vulnerability dict.
+		dict: Vulnerability dict, or None if the CVE could not be resolved.
 	"""
-	cve_info = CVESearch('https://cve.circl.lu').id(cve_id)
-	if not cve_info:
+	cve_info = lookup_cve(cve_id)
+	if not cve_info or not cve_info.get('id'):
 		logger.error(f'Could not fetch CVE info for cve {cve_id}. Skipping.')
 		return None
 	vuln_cve_id = cve_info['id']
 	vuln_name = vuln_cve_id
-	vuln_description = cve_info.get('summary', 'none').replace(vuln_cve_id, '').strip()
+	vuln_description = (cve_info.get('summary') or 'none').replace(vuln_cve_id, '').strip()
 	try:
-		vuln_cvss = float(cve_info.get('cvss', -1))
+		vuln_cvss = float(cve_info['cvss']) if cve_info.get('cvss') is not None else -1
 	except (ValueError, TypeError):
 		vuln_cvss = -1
 	vuln_cwe_id = cve_info.get('cwe', '')
-	exploit_ids = cve_info.get('refmap', {}).get('exploit-db', [])
-	osvdb_ids = cve_info.get('refmap', {}).get('osvdb', [])
 	references = cve_info.get('references', [])
-	capec_objects = cve_info.get('capec', [])
+	vuln_severity = cvss_to_severity(vuln_cvss)
 
-	# Parse ovals for a better vuln name / type
-	ovals = cve_info.get('oval', [])
-	if ovals:
-		vuln_name = ovals[0]['title']
-		vuln_type = ovals[0]['family']
-
-	# Set vulnerability severity based on CVSS score
-	vuln_severity = 'info'
-	if vuln_cvss < 4:
-		vuln_severity = 'low'
-	elif vuln_cvss < 7:
-		vuln_severity = 'medium'
-	elif vuln_cvss < 9:
-		vuln_severity = 'high'
-	else:
-		vuln_severity = 'critical'
-
-	# Build console warning message
-	msg = f'{vuln_name} | {vuln_severity.upper()} | {vuln_cve_id} | {vuln_cwe_id} | {vuln_cvss}'
-	for id in osvdb_ids:
-		msg += f'\n\tOSVDB: {id}'
-	for exploit_id in exploit_ids:
-		msg += f'\n\tEXPLOITDB: {exploit_id}'
-	logger.warning(msg)
-	vuln = {
+	logger.warning(f'{vuln_name} | {vuln_severity.upper()} | {vuln_cve_id} | {vuln_cwe_id} | {vuln_cvss}')
+	return {
 		'name': vuln_name,
 		'type': vuln_type,
 		'severity': NUCLEI_SEVERITY_MAP[vuln_severity],
@@ -3626,9 +3606,8 @@ def cve_to_vuln(cve_id, vuln_type=''):
 		'cvss_score': vuln_cvss,
 		'references': references,
 		'cve_ids': [vuln_cve_id],
-		'cwe_ids': [vuln_cwe_id]
+		'cwe_ids': [vuln_cwe_id] if vuln_cwe_id else []
 	}
-	return vuln
 
 
 def parse_s3scanner_result(line):
@@ -4708,6 +4687,10 @@ def llm_vulnerability_description(vulnerability_id):
 		gpt_generator = LLMVulnerabilityReportGenerator(logger=logger)
 		response = gpt_generator.get_vulnerability_description(vulnerability_description)
 		logger.info(response)
+		if not response.get('status'):
+			# Don't cache or overwrite existing vulnerability data with an error
+			logger.error(f"LLM vulnerability description failed: {response.get('error')}")
+			return response
 		add_gpt_description_db(
 			lookup_vulnerability.name,
 			path,

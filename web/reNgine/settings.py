@@ -168,7 +168,6 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
-USE_L10N = True
 USE_TZ = True
 
 MEDIA_URL = '/media/'
@@ -343,3 +342,8 @@ CACHES = {
         'TIMEOUT': 60 * 30,  # 30 minutes caching will be used
     }
 }
+# drf-yasg: use the non-compat renderers (format without leading dot)
+SWAGGER_USE_COMPAT_RENDERERS = False
+
+# Matches the PK type already used by existing migrations
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
