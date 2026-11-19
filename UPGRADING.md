@@ -52,3 +52,22 @@ The Anthropic (Claude) API key is set in **Settings → API Vault**, then pick a
 
 - The first `celery` start after upgrading re-clones theHarvester at 4.11.1 (your `api-keys.yaml` is kept) and builds per-tool virtualenvs, so it takes a few minutes.
 - amass stays on v3.23.3. Moving to amass v5 needs a parser rewrite, which is planned separately.
+
+## Running behind another reverse proxy
+
+If nginx, Caddy or Traefik already uses port 443 on the host, move reNgine to another port and listen on loopback only:
+
+```env
+RENGINE_BIND_ADDRESS=127.0.0.1
+RENGINE_HTTPS_PORT=4430
+CSRF_TRUSTED_ORIGINS=https://recon.example.com
+```
+
+Outer nginx:
+
+```nginx
+location / {
+    proxy_pass https://127.0.0.1:4430;
+    include proxy_params;   # forwards Host and X-Forwarded-Proto
+}
+```

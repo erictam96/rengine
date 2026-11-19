@@ -9,8 +9,15 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-# shellcheck disable=SC1091
-set -a; source .env; set +a
+# Read .env literally. Sourcing it with bash breaks on values containing
+# shell characters such as & or $ (common in generated passwords).
+while IFS='=' read -r key value || [ -n "$key" ]; do
+  key=$(printf '%s' "$key" | tr -d '[:space:]')
+  case "$key" in ''|\#*) continue ;; esac
+  value=${value%$'\r'}
+  value=${value#\"}; value=${value%\"}
+  export "$key=$value"
+done < .env
 
 PROJECT=${COMPOSE_PROJECT_NAME:-rengine}
 OLD_VOL="${PROJECT}_postgres_data"
