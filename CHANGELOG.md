@@ -22,6 +22,9 @@
 - Ollama model downloads use POST instead of GET; the inverted success/error check on model deletion is fixed
 
 ### Fixes
+- Behind reNgine's own HTTPS nginx (and any outer reverse proxy), Django 5 rejected every POST, including login, as a CSRF failure. Django now trusts the proxy's `X-Forwarded-Proto` header, and `CSRF_TRUSTED_ORIGINS` can be set in `.env`
+- Host ports are configurable in `.env` (`RENGINE_HTTPS_PORT`, `RENGINE_HTTP_PORT`, `RENGINE_BIND_ADDRESS`) for running behind another reverse proxy
+- `make upgrade-db` failed when `.env` values contained shell characters such as `&`
 - CVE enrichment for nmap vulners results was broken: CIRCL changed its API format and `pycvesearch` no longer imports. It now uses NVD API 2.0 with CIRCL as fallback (`NVD_API_KEY` is optional)
 - Replaced `whatportis`, which pinned a vulnerable `requests==2.25.1`, with nmap's service database
 - Every tool command (nuclei, dalfox, crlfuzz, ffuf, gospider, katana, hakrawler) broke when custom headers were set: the headers were glued onto the previous flag

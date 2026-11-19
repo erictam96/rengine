@@ -347,3 +347,12 @@ SWAGGER_USE_COMPAT_RENDERERS = False
 
 # Matches the PK type already used by existing migrations
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# reNgine always runs behind its nginx container, which terminates TLS and
+# overwrites X-Forwarded-Proto. Django 4+ checks the Origin header against
+# the request scheme, so without this every POST (login included) is a 403.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Extra origins for CSRF, e.g. when an outer reverse proxy serves reNgine on
+# another hostname/port:  CSRF_TRUSTED_ORIGINS=https://recon.example.com,https://10.0.0.5:4430
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in env('CSRF_TRUSTED_ORIGINS', default='').split(',') if o.strip()]

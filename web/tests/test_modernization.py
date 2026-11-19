@@ -313,3 +313,21 @@ class CommandBuilderTests(TestCase):
 		src = inspect.getsource(t)
 		self.assertNotIn('cmd += formatted_headers', src)
 		self.assertNotIn("' -fr' if follow_redirect", src)
+
+
+class ReverseProxyCSRFTests(TestCase):
+	"""Behind nginx (HTTPS) Django 4+ compares the Origin header with the
+	request scheme; without SECURE_PROXY_SSL_HEADER every POST (incl. login)
+	fails with 403."""
+
+	def test_login_post_through_https_proxy(self):
+		from django.test import Client
+		User.objects.create_user('alice', password='pw')
+		c = Client(enforce_csrf_checks=True)
+		hdrs = {'HTTP_HOST': 'nothing2scan.com', 'HTTP_X_FORWARDED_PROTO': 'https'}
+		c.get('/login/', **hdrs)
+		token = c.cookies['csrftoken'].value
+		resp = c.post('/login/', {'username': 'alice', 'password': 'pw', 'csrfmiddlewaretoken': token},
+					  HTTP_ORIGIN='https://nothing2scan.com', HTTP_REFERER='https://nothing2scan.com/login/', **hdrs)
+		self.assertNotEqual(resp.status_code, 403)
+		self.assertEqual(resp.status_code, 302)
